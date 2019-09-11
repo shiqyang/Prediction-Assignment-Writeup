@@ -1,0 +1,127 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Shiqi Yang"
+date: "9/11/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Executive Summary
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, our goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants.They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+## Data Loading and Exploring
+```{r}
+# load data
+training <- read.csv('./pml-training.csv', header=T)
+testing <- read.csv('./pml-testing.csv', header=T)
+dim(training)
+dim(testing)
+
+# explore data
+str(training)
+
+```
+
+We can notice that many columns have NA values or blank values on almost every observation. So we will remove them, because they will not produce any information. The first seven columns give information about the people who did the test, and also timestamps. We will not take them in our model.
+```{r}
+# remove columns having at least 90% of NA or blank values on the training dataset
+indColToRemove <- which(colSums(is.na(training)|training=="")>0.9*dim(training)[1]) 
+TrainDataClean <- training[,-indColToRemove]
+# remove first 7 columns
+TrainDataClean <- TrainDataClean[,-c(1:7)]
+dim(TrainDataClean)
+
+# remove columns having at least 90% of NA or blank values on the testing dataset
+indColToRemove <- which(colSums(is.na(testing) |testing=="")>0.9*dim(testing)[1]) 
+TestDataClean <- testing[,-indColToRemove]
+dim(TestDataClean)
+```
+
+## Correlation Analysis
+```{r}
+library(corrplot)
+corMatrix <- cor(TrainDataClean[, -53])
+corrplot(corMatrix, order = "FPC", method = "color", type = "lower", 
+         tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+```
+
+
+## Model Building
+Three methods will be applied - Random Forests, Classification Tree, and Gradient Boosted Model. In order to limit the effects of overfitting, and improve the efficicency of the models, we will use the cross-validation technique (3 folds).
+
+### Random Forests
+```{r, cache=TRUE}
+library(caret)
+library(rattle)
+library(rpart)
+
+# Data partition
+set.seed(12345)
+inTrain1 <- createDataPartition(TrainDataClean$classe, p=0.75, list=FALSE)
+Train1 <- TrainDataClean[inTrain1,]
+Test1 <- TrainDataClean[-inTrain1,]
+# Model fit
+controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+modFit_RandForest <- train(classe ~ ., data=Train1, method="rf", trControl=controlRF)
+modFit_RandForest
+
+# predict on test set
+predict_RandForest <- predict(modFit_RandForest, newdata=Test1)
+confMat_RandForest <- confusionMatrix(predict_RandForest, Test1$classe)
+
+# display confusion matrix and model accuracy
+confMat_RandForest$table; confMat_RandForest$overall[1]
+
+plot(modFit_RandForest,main="Accuracy of Random forest model by number of predictors")
+
+# Compute the variable importance 
+MostImpVars <- varImp(modFit_RandForest)
+MostImpVars
+```
+It appears that the optimal number of predictors is two, which provides 99% accuracy using cross-validation with 3 folds. The out of sample error is expected to be 1%. The accuracy drops as the number of predictors increases. The top two most important variables are roll_belt and yaw_belt.
+
+### Classification Trees
+```{r, cache=TRUE}
+# model fit
+set.seed(12345)
+ControlCT <- trainControl(method="cv", number=3)
+modFit_Tree <- train(classe ~ ., data=Train1, method="rpart", trControl=ControlCT)
+fancyRpartPlot(modFit_Tree$finalModel)
+
+# prediction on Test dataset
+predict_Tree <- predict(modFit_Tree, newdata=Test1)
+confMat_Tree <- confusionMatrix(predict_Tree, Test1$classe)
+
+# display confusion matrix and model accuracy
+confMat_Tree$table; confMat_Tree$overall[1]
+```
+The classification tree provides only 49% accuracy which is not a good model for predicting "classe". The out of sample error is expected to be 51%.
+
+### Gradient boosting machine
+```{r, cache=TRUE}
+# model fit
+set.seed(12345)
+ControlCT <- trainControl(method="cv", number=3)
+modFit_GBM <- train(classe~., data=Train1, method="gbm", trControl=ControlCT, verbose=FALSE)
+modFit_GBM
+
+# prediction on Test dataset
+predict_GBM <- predict(modFit_GBM,newdata=Test1)
+confMat_GBM <- confusionMatrix(predict_GBM, Test1$classe)
+
+# display confusion matrix and model accuracy
+confMat_GBM$table; confMat_GBM$overall[1]
+
+```
+The gradient boosting machine model provides 96% accuracy. The out of sample error is expected to be 4%.
+
+## Conclusion
+The random forest model provides the highest accuracy, which will be used to predict classe for the test data set.
+```{r, cache=TRUE}
+FinalPredict_RandForest <- predict(modFit_RandForest, newdata=TestDataClean)
+FinalPredict_RandForest
+```
+
